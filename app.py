@@ -176,9 +176,7 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         chroma_db_impl="duckdb+parquet",
         persist_directory=persist_dir,
         anonymized_telemetry=False,
-        allow_reset=True,
-        tenant="default_tenant",
-        database="default_database"
+        allow_reset=True
     )
 
     try:
@@ -211,6 +209,7 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         collection_name="rfp_responses",
         client_settings=chroma_settings
     )
+
 
 
 
