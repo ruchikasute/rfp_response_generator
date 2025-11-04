@@ -1,0 +1,10 @@
+streamlit
+openai
+langchain==0.1.16
+langchain-openai==0.1.1
+langchain-chroma==0.1.0
+PyPDF2
+numpy
+scikit-learn
+tiktoken
+python-docx
