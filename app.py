@@ -159,75 +159,63 @@ def extract_text(file):
 #         collection_name="rfp_responses"
 #     )
 
-from chromadb.config import Settings # Keep this import for the moment, but we'll remove its usage
-
 def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
-    os.makedirs(folder, exist_ok=True)
-    os.makedirs(persist_dir, exist_ok=True)
-
-    embedding_model = AzureOpenAIEmbeddings(
-        model="text-embedding-ada-002",
-        azure_endpoint=os.getenv("AZURE_OPENAI_EMD_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_EMD_KEY"),
-        api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
-    )
-    
-    # *** ❌ REMOVE THE client_settings BLOCK ❌ ***
-    # chroma_settings = Settings(
-    #     chroma_db_impl="duckdb+parquet",
-    #     persist_directory=persist_dir,
-    #     anonymized_telemetry=False,
-    #     allow_reset=True
-    # )
-    
-    # ----------------------------------------------------
-    #  ✅ MODIFIED LOGIC: Check for and load existing DB
-    # ----------------------------------------------------
-    # Check if the persistence directory contains a ChromaDB.
-    # The Chroma class from langchain_chroma handles loading from
-    # persist_directory when instantiated.
-
+    """Build or load Chroma vector DB safely. Auto-repairs if corrupted."""
     try:
-        # Check if persist_dir is not empty (contains files indicating an existing DB)
-        if os.listdir(persist_dir):
-            st.write(f"Attempting to load existing DB from {persist_dir}...")
+        # 🔹 Create embedding model
+        embedding = AzureOpenAIEmbeddings(
+            model="text-embedding-ada-002",
+            azure_endpoint=os.getenv("AZURE_OPENAI_EMD_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_EMD_KEY"),
+            api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
+        )
+
+        # 🔹 Try to load existing DB
+        if os.path.exists(persist_dir) and os.listdir(persist_dir):
+            st.write("📦 Loading existing Chroma database...")
             return Chroma(
-                embedding_function=embedding_model,
                 persist_directory=persist_dir,
                 collection_name="rfp_responses",
-                # ❌ REMOVE: client_settings=chroma_settings
+                embedding_function=embedding
             )
-    except Exception as e:
-        # Catch case where loading fails (e.g., corrupt or incompatible files)
-        st.warning(f"⚠️ Error loading existing DB: {e}. Rebuilding from scratch...")
 
-    # ----------------------------------------------------
-    #  ✅ MODIFIED LOGIC: Build from scratch
-    # ----------------------------------------------------
-    docs = []
-    # Use st.spinner for file processing to look cleaner in Streamlit UI
-    with st.spinner(f"Scanning {folder} for documents..."):
+        # 🔹 Otherwise, build new DB from local Knowledge_Repo
+        st.warning("⚙️ No existing DB found. Building from scratch...")
+
+        docs = []
         for f in os.listdir(folder):
             if f.endswith((".pdf", ".docx")):
-                path = os.path.join(folder, f)
-                # Ensure the file is actually available before opening
-                if os.path.isfile(path):
-                    text = extract_text(open(path, "rb"))
+                with open(os.path.join(folder, f), "rb") as file:
+                    text = extract_text(file)
                     if text.strip():
                         docs.append(LDocument(page_content=text, metadata={"source": f}))
 
-    if not docs:
-        raise ValueError(f"No readable files found in {folder}. Please add files to rebuild the knowledge base.")
+        if not docs:
+            raise ValueError(f"No readable files found in {folder}")
 
-    st.write(f"Creating new ChromaDB with {len(docs)} documents...")
-    return Chroma.from_documents(
-        documents=docs,
-        embedding=embedding_model,
-        persist_directory=persist_dir,
-        collection_name="rfp_responses",
-        # ❌ REMOVE: client_settings=chroma_settings
-    )
+        knowledge_db = Chroma.from_documents(
+            documents=docs,
+            embedding=embedding,
+            collection_name="rfp_responses",
+            persist_directory=persist_dir
+        )
 
+        st.success("✅ Knowledge base created and saved.")
+        return knowledge_db
+
+    except Exception as e:
+        st.error(f"⚠️ Error initializing Chroma DB: {e}")
+        st.warning("Resetting Chroma DB and rebuilding fresh...")
+
+        # 🔹 Auto-reset corrupted DB
+        import shutil
+        if os.path.exists(persist_dir):
+            shutil.rmtree(persist_dir, ignore_errors=True)
+
+        os.makedirs(persist_dir, exist_ok=True)
+
+        # Retry building DB cleanly
+        return build_knowledge_base(folder, persist_dir)
 
 
 
