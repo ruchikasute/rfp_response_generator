@@ -159,63 +159,59 @@ def extract_text(file):
 #         collection_name="rfp_responses"
 #     )
 
+from langchain_chroma import Chroma
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain_core.documents import Document as LDocument
+import os
+import shutil
+
 def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
-    """Build or load Chroma vector DB safely. Auto-repairs if corrupted."""
-    try:
-        # 🔹 Create embedding model
-        embedding = AzureOpenAIEmbeddings(
-            model="text-embedding-ada-002",
-            azure_endpoint=os.getenv("AZURE_OPENAI_EMD_ENDPOINT"),
-            api_key=os.getenv("AZURE_OPENAI_EMD_KEY"),
-            api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
-        )
+    """Load or rebuild a local Chroma vectorstore safely (no tenant errors)."""
+    os.makedirs(folder, exist_ok=True)
+    os.makedirs(persist_dir, exist_ok=True)
 
-        # 🔹 Try to load existing DB
-        if os.path.exists(persist_dir) and os.listdir(persist_dir):
-            st.write("📦 Loading existing Chroma database...")
-            return Chroma(
-                persist_directory=persist_dir,
-                collection_name="rfp_responses",
-                embedding_function=embedding
-            )
+    embedding_model = AzureOpenAIEmbeddings(
+        model="text-embedding-ada-002",
+        azure_endpoint=os.getenv("AZURE_OPENAI_EMD_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_EMD_KEY"),
+        api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
+    )
 
-        # 🔹 Otherwise, build new DB from local Knowledge_Repo
-        st.warning("⚙️ No existing DB found. Building from scratch...")
-
+    def create_fresh_chroma():
         docs = []
         for f in os.listdir(folder):
             if f.endswith((".pdf", ".docx")):
-                with open(os.path.join(folder, f), "rb") as file:
-                    text = extract_text(file)
+                path = os.path.join(folder, f)
+                try:
+                    text = extract_text(open(path, "rb"))
                     if text.strip():
                         docs.append(LDocument(page_content=text, metadata={"source": f}))
+                except Exception as e:
+                    print(f"⚠️ Skipped {f}: {e}")
 
         if not docs:
             raise ValueError(f"No readable files found in {folder}")
 
-        knowledge_db = Chroma.from_documents(
+        print("📘 Creating new ChromaDB with", len(docs), "documents...")
+        return Chroma.from_documents(
             documents=docs,
-            embedding=embedding,
-            collection_name="rfp_responses",
-            persist_directory=persist_dir
+            embedding=embedding_model,
+            persist_directory=persist_dir,
+            collection_name="rfp_responses"
         )
 
-        st.success("✅ Knowledge base created and saved.")
-        return knowledge_db
-
+    try:
+        print("📂 Attempting to load existing DB from", persist_dir)
+        return Chroma(
+            embedding_function=embedding_model,
+            persist_directory=persist_dir,
+            collection_name="rfp_responses"
+        )
     except Exception as e:
-        st.error(f"⚠️ Error initializing Chroma DB: {e}")
-        st.warning("Resetting Chroma DB and rebuilding fresh...")
-
-        # 🔹 Auto-reset corrupted DB
-        import shutil
-        if os.path.exists(persist_dir):
-            shutil.rmtree(persist_dir, ignore_errors=True)
-
+        print(f"⚠️ Error loading existing DB: {e}. Rebuilding fresh...")
+        shutil.rmtree(persist_dir, ignore_errors=True)
         os.makedirs(persist_dir, exist_ok=True)
-
-        # Retry building DB cleanly
-        return build_knowledge_base(folder, persist_dir)
+        return create_fresh_chroma()
 
 
 
