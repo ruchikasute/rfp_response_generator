@@ -160,8 +160,7 @@ def extract_text(file):
 #     )
 
 def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
-    """Build or load persistent Chroma vector DB from Knowledge_Repo"""
-    # ... (rest of build_knowledge_base remains the same)
+    """Build or load persistent Chroma vector DB from Knowledge_Repo."""
     os.makedirs(folder, exist_ok=True)
     os.makedirs(persist_dir, exist_ok=True)
 
@@ -172,13 +171,21 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
     )
 
-    if os.listdir(persist_dir):
-        return Chroma(
-            embedding_function=embedding_model,
-            persist_directory=persist_dir,
-            collection_name="rfp_responses"
-        )
+    try:
+        # Try loading existing DB
+        if os.listdir(persist_dir):
+            return Chroma(
+                embedding_function=embedding_model,
+                persist_directory=persist_dir,
+                collection_name="rfp_responses"
+            )
+    except Exception as e:
+        # If loading fails, rebuild
+        st.warning(f"⚠️ Rebuilding vector DB due to error: {e}")
+        for f in os.listdir(persist_dir):
+            os.remove(os.path.join(persist_dir, f))
 
+    # --- Rebuild DB from documents ---
     docs = []
     for f in os.listdir(folder):
         if f.endswith((".pdf", ".docx")):
@@ -196,6 +203,7 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         persist_directory=persist_dir,
         collection_name="rfp_responses"
     )
+
 
 def apply_bullet_to_para(paragraph, list_id='1'):
     """
