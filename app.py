@@ -160,10 +160,24 @@ def extract_text(file):
 #     )
 
 def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
-    """Build or load persistent Chroma vector DB from Knowledge_Repo."""
+    """Always build a fresh Chroma DB from knowledge documents."""
+
+    import shutil
+
+    st.info("📚 Initializing knowledge base...")
+
     os.makedirs(folder, exist_ok=True)
     os.makedirs(persist_dir, exist_ok=True)
 
+    # Step 1: Force delete old Chroma DB (fixes tenant issues)
+    if os.path.exists(persist_dir):
+        try:
+            shutil.rmtree(persist_dir)
+            st.write("🧹 Old Chroma DB removed.")
+        except Exception as e:
+            st.warning(f"Could not clear old Chroma DB: {e}")
+
+    # Step 2: Setup embedding model
     embedding_model = AzureOpenAIEmbeddings(
         model="text-embedding-ada-002",
         azure_endpoint=os.getenv("AZURE_OPENAI_EMD_ENDPOINT"),
@@ -171,38 +185,32 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
     )
 
-    try:
-        # Try loading existing DB
-        if os.listdir(persist_dir):
-            return Chroma(
-                embedding_function=embedding_model,
-                persist_directory=persist_dir,
-                collection_name="rfp_responses"
-            )
-    except Exception as e:
-        # If loading fails, rebuild
-        st.warning(f"⚠️ Rebuilding vector DB due to error: {e}")
-        for f in os.listdir(persist_dir):
-            os.remove(os.path.join(persist_dir, f))
-
-    # --- Rebuild DB from documents ---
+    # Step 3: Load documents from Knowledge_Repo
     docs = []
     for f in os.listdir(folder):
         if f.endswith((".pdf", ".docx")):
             path = os.path.join(folder, f)
-            text = extract_text(open(path, "rb"))
-            if text.strip():
-                docs.append(LDocument(page_content=text, metadata={"source": f}))
+            try:
+                text = extract_text(open(path, "rb"))
+                if text.strip():
+                    docs.append(LDocument(page_content=text, metadata={"source": f}))
+            except Exception as e:
+                st.warning(f"Could not read {f}: {e}")
 
     if not docs:
-        raise ValueError(f"No readable files found in {folder}")
+        st.error(f"No readable files found in {folder}")
+        raise ValueError("No valid knowledge base documents found!")
 
-    return Chroma.from_documents(
+    # Step 4: Build vectorstore
+    db = Chroma.from_documents(
         documents=docs,
         embedding=embedding_model,
         persist_directory=persist_dir,
         collection_name="rfp_responses"
     )
+
+    st.success("✅ Knowledge base successfully rebuilt.")
+    return db
 
 
 def apply_bullet_to_para(paragraph, list_id='1'):
