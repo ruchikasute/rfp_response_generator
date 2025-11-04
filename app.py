@@ -159,6 +159,8 @@ def extract_text(file):
 #         collection_name="rfp_responses"
 #     )
 
+from chromadb.config import Settings
+
 def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
     os.makedirs(folder, exist_ok=True)
     os.makedirs(persist_dir, exist_ok=True)
@@ -170,12 +172,22 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         api_version=os.getenv("AZURE_OPENAI_EMD_VERSION")
     )
 
+    chroma_settings = Settings(
+        chroma_db_impl="duckdb+parquet",
+        persist_directory=persist_dir,
+        anonymized_telemetry=False,
+        allow_reset=True,
+        tenant="default_tenant",
+        database="default_database"
+    )
+
     try:
         if os.listdir(persist_dir):
             return Chroma(
                 embedding_function=embedding_model,
                 persist_directory=persist_dir,
-                collection_name="rfp_responses"
+                collection_name="rfp_responses",
+                client_settings=chroma_settings
             )
     except Exception as e:
         print(f"⚠️ Error loading existing DB: {e}. Rebuilding...")
@@ -196,8 +208,10 @@ def build_knowledge_base(folder=KNOWLEDGE_FOLDER, persist_dir=PERSIST_DIR):
         documents=docs,
         embedding=embedding_model,
         persist_directory=persist_dir,
-        collection_name="rfp_responses"
+        collection_name="rfp_responses",
+        client_settings=chroma_settings
     )
+
 
 
 
